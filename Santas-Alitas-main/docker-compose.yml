@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  mesero-app:
+    build: .
+    image: saturnx/mesero-app:latest
+    container_name: mesero_santas_alitas
+    ports:
+      - "5806:3000"
+    volumes:
+      - ./data:/app/data
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/app/data/restaurant.db

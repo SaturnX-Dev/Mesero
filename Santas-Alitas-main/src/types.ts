@@ -1,15 +1,27 @@
-export type Category = 
-  | 'SNACKS' 
-  | 'ESPECIALES' 
-  | 'ALITAS' 
-  | 'BONELESS' 
-  | 'DIPS'
-  | 'HAMBURGUESAS' 
-  | 'MICHELADAS' 
-  | 'POSTRES Y CAFÉ' 
-  | 'CERVEZAS' 
-  | 'SIN ALCOHOL' 
-  | 'COMBOS';
+export type Category = string;
+
+export interface DbCategory {
+  id: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface DbModifier {
+  id: string;
+  name: string;
+  type: string;
+  options_json: string;
+  max_selections: number;
+}
+
+export interface DbPromotion {
+  id: string;
+  name: string;
+  description: string;
+  conditions_json: string;
+  discount_json: string;
+  is_active: number | boolean;
+}
 
 export interface ModifierOption {
   id: string;

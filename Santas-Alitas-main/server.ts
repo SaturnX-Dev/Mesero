@@ -1,11 +1,19 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import Database from "better-sqlite3";
 import { Product, Category } from "./src/types";
 import { MENU_DATA } from "./src/data";
 
-const db = new Database("restaurant.db");
+const dbPath = process.env.DB_PATH || "restaurant.db";
+// Ensure directory exists if DB_PATH is in a subfolder
+const dbDir = path.dirname(dbPath);
+if (dbDir !== "." && !fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
+const db = new Database(dbPath);
 
 // Enable WAL mode for better concurrent read/write performance
 db.pragma('journal_mode = WAL');
@@ -20,6 +28,29 @@ db.exec(`
     price REAL NOT NULL,
     category TEXT NOT NULL,
     modifiers TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS modifiers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    options_json TEXT, -- array of options
+    max_selections INTEGER DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS promotions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    conditions_json TEXT,
+    discount_json TEXT,
+    is_active INTEGER DEFAULT 1
   );
 
   CREATE TABLE IF NOT EXISTS tables (
@@ -60,7 +91,48 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    pin TEXT NOT NULL,
+    role TEXT DEFAULT 'waiter', -- 'admin' or 'waiter'
+    theme TEXT DEFAULT 'light',
+    accent_color TEXT DEFAULT '#ea580c'
+  );
+
+  CREATE TABLE IF NOT EXISTS table_requests (
+    id TEXT PRIMARY KEY,
+    table_id TEXT NOT NULL,
+    from_user_name TEXT NOT NULL,
+    items_json TEXT NOT NULL,
+    status TEXT DEFAULT 'pending', -- 'pending' | 'approved' | 'rejected'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
+
+// Graceful schema upgrades
+try { db.exec("ALTER TABLE orders ADD COLUMN waiter_name TEXT;"); } catch (e) {}
+try { db.exec("ALTER TABLE order_items ADD COLUMN status TEXT DEFAULT 'pending';"); } catch (e) {}
+try { db.exec("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'light';"); } catch (e) {}
+try { db.exec("ALTER TABLE users ADD COLUMN accent_color TEXT DEFAULT '#ea580c';"); } catch (e) {}
+
+// Seed Users as requested
+const seedUsers = [
+  { id: 'admin', name: 'root', pin: 'admin', role: 'admin' },
+  { id: 'waiter1', name: 'Mesero 1', pin: 'Alitas', role: 'waiter' },
+  { id: 'waiter2', name: 'Mesero 2', pin: 'Alitas', role: 'waiter' },
+  { id: 'waiter3', name: 'Mesero 3', pin: 'Alitas', role: 'waiter' }
+];
+
+const checkUser = db.prepare("SELECT * FROM users WHERE id = ?");
+const insertUser = db.prepare("INSERT INTO users (id, name, pin, role) VALUES (?, ?, ?, ?)");
+
+for (const u of seedUsers) {
+  if (!checkUser.get(u.id)) {
+    insertUser.run(u.id, u.name, u.pin, u.role);
+  }
+}
 
 // Auto-purge: delete closed orders older than 7 days
 const purgeOld = db.prepare(`
@@ -85,6 +157,16 @@ const insertProduct = db.prepare(`
 
 for (const p of MENU_DATA) {
   insertProduct.run(p.id, p.name, p.description, p.price, p.category, p.modifiers ? JSON.stringify(p.modifiers) : null);
+}
+
+// Seed categories if empty
+const catCount = db.prepare("SELECT count(*) as count FROM categories").get() as { count: number };
+if (catCount.count === 0) {
+  const distinctCategories = db.prepare("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ''").all();
+  const insertCat = db.prepare("INSERT INTO categories (id, name, sort_order) VALUES (?, ?, ?)");
+  distinctCategories.forEach((c: any, index: number) => {
+    insertCat.run(Math.random().toString(36).substr(2, 9), c.category, index);
+  });
 }
 
 const tableCount = db.prepare("SELECT count(*) as count FROM tables").get() as { count: number };
@@ -114,17 +196,32 @@ async function startServer() {
 
   // Settings Routes
   app.get("/api/settings", (req, res) => {
-    const rows = db.prepare("SELECT key, value FROM settings").all() as { key: string, value: string }[];
-    const settings: Record<string, string> = {};
-    rows.forEach(r => { settings[r.key] = r.value; });
-    res.json(settings);
+    const userId = req.query.userId;
+    if (userId) {
+      const user = db.prepare("SELECT theme, accent_color as accentColor FROM users WHERE id = ?").get(userId) as any;
+      res.json(user || { theme: 'light', accentColor: '#ea580c' });
+    } else {
+      const rows = db.prepare("SELECT key, value FROM settings").all() as { key: string, value: string }[];
+      const settings: Record<string, string> = {};
+      rows.forEach(r => { settings[r.key] = r.value; });
+      res.json(settings);
+    }
   });
 
   app.post("/api/settings", (req, res) => {
-    const { key, value } = req.body;
-    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-      .run(key, value);
-    res.json({ success: true });
+    const { key, value, userId } = req.body;
+    if (userId) {
+      if (key === 'theme') {
+        db.prepare("UPDATE users SET theme = ? WHERE id = ?").run(value, userId);
+      } else if (key === 'accentColor') {
+        db.prepare("UPDATE users SET accent_color = ? WHERE id = ?").run(value, userId);
+      }
+      res.json({ success: true });
+    } else {
+      db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .run(key, value);
+      res.json({ success: true });
+    }
   });
 
   // API Routes
@@ -152,12 +249,113 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // --- Categories CRUD ---
+  app.get("/api/categories", (req, res) => {
+    res.json(db.prepare("SELECT * FROM categories ORDER BY sort_order").all());
+  });
+
+  app.post("/api/categories", (req, res) => {
+    const { id, name, sort_order } = req.body;
+    const insert = db.prepare("INSERT INTO categories (id, name, sort_order) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sort_order=excluded.sort_order");
+    insert.run(id || Math.random().toString(36).substr(2, 9), name, sort_order || 0);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/categories/:id", (req, res) => {
+    db.prepare("DELETE FROM categories WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // --- Modifiers CRUD ---
+  app.get("/api/modifiers", (req, res) => {
+    res.json(db.prepare("SELECT * FROM modifiers").all());
+  });
+
+  app.post("/api/modifiers", (req, res) => {
+    const { id, name, type, options_json, max_selections } = req.body;
+    const insert = db.prepare("INSERT INTO modifiers (id, name, type, options_json, max_selections) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, type=excluded.type, options_json=excluded.options_json, max_selections=excluded.max_selections");
+    insert.run(id || Math.random().toString(36).substr(2, 9), name, type, options_json ? JSON.stringify(options_json) : null, max_selections || 1);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/modifiers/:id", (req, res) => {
+    db.prepare("DELETE FROM modifiers WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // --- Promotions CRUD ---
+  app.get("/api/promotions", (req, res) => {
+    res.json(db.prepare("SELECT * FROM promotions").all());
+  });
+
+  app.post("/api/promotions", (req, res) => {
+    const { id, name, description, conditions_json, discount_json, is_active } = req.body;
+    const insert = db.prepare("INSERT INTO promotions (id, name, description, conditions_json, discount_json, is_active) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, conditions_json=excluded.conditions_json, discount_json=excluded.discount_json, is_active=excluded.is_active");
+    insert.run(id || Math.random().toString(36).substr(2, 9), name, description, conditions_json ? JSON.stringify(conditions_json) : null, discount_json ? JSON.stringify(discount_json) : null, is_active === false ? 0 : 1);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/promotions/:id", (req, res) => {
+    db.prepare("DELETE FROM promotions WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // Export/Import Menu Routes
+  app.get("/api/menu/export", (req, res) => {
+    const backup = {
+      products: db.prepare("SELECT * FROM products").all(),
+      categories: db.prepare("SELECT * FROM categories").all(),
+      modifiers: db.prepare("SELECT * FROM modifiers").all(),
+      promotions: db.prepare("SELECT * FROM promotions").all()
+    };
+    res.json(backup);
+  });
+
+  app.post("/api/menu/import", (req, res) => {
+    const { products, categories, modifiers, promotions } = req.body;
+    try {
+      db.transaction(() => {
+        // We could clear tables first, or just insert/replace
+        if (categories) {
+          db.prepare("DELETE FROM categories").run();
+          const insertCat = db.prepare("INSERT INTO categories (id, name, sort_order) VALUES (?, ?, ?)");
+          for (const c of categories) insertCat.run(c.id, c.name, c.sort_order);
+        }
+        if (modifiers) {
+          db.prepare("DELETE FROM modifiers").run();
+          const insertMod = db.prepare("INSERT INTO modifiers (id, name, type, options_json, max_selections) VALUES (?, ?, ?, ?, ?)");
+          for (const m of modifiers) insertMod.run(m.id, m.name, m.type, m.options_json, m.max_selections);
+        }
+        if (promotions) {
+          db.prepare("DELETE FROM promotions").run();
+          const insertPromo = db.prepare("INSERT INTO promotions (id, name, description, conditions_json, discount_json, is_active) VALUES (?, ?, ?, ?, ?, ?)");
+          for (const p of promotions) insertPromo.run(p.id, p.name, p.description, p.conditions_json, p.discount_json, p.is_active);
+        }
+        if (products) {
+          db.prepare("DELETE FROM products").run();
+          const insertProd = db.prepare("INSERT INTO products (id, name, description, price, category, modifiers) VALUES (?, ?, ?, ?, ?, ?)");
+          for (const p of products) insertProd.run(p.id, p.name, p.description, p.price, p.category, p.modifiers);
+        }
+      })();
+      res.json({ success: true });
+    } catch(err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.get("/api/tables", (req, res) => {
     const tables = db.prepare("SELECT * FROM tables").all();
-    // Get active order status for each table
+    // Get active order status and waiter name for each table
     const tablesWithStatus = tables.map((t: any) => {
-      const activeOrder = db.prepare("SELECT id FROM orders WHERE table_id = ? AND status = 'OPEN'").get(t.id);
-      return { ...t, isOccupied: !!activeOrder };
+      const activeOrder = db.prepare("SELECT id, waiter_name FROM orders WHERE table_id = ? AND status = 'OPEN'").get(t.id) as any;
+      const pendingReq = db.prepare("SELECT count(id) as count FROM table_requests WHERE table_id = ? AND status = 'pending'").get(t.id) as any;
+      
+      return { 
+        ...t, 
+        isOccupied: !!activeOrder, 
+        waiterName: activeOrder?.waiter_name || null,
+        pendingRequests: pendingReq?.count || 0
+      };
     });
     res.json(tablesWithStatus);
   });
@@ -171,6 +369,49 @@ async function startServer() {
 
   app.delete("/api/tables/:id", (req, res) => {
     db.prepare("DELETE FROM tables WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // --- Users & Auth Routes ---
+  app.get("/api/users", (req, res) => {
+    const users = db.prepare("SELECT id, name, role FROM users").all();
+    res.json(users);
+  });
+
+  app.post("/api/users/login", (req, res) => {
+    const { name, pin } = req.body;
+    const user = db.prepare("SELECT id, name, role, theme, accent_color as accentColor FROM users WHERE name = ? AND pin = ?").get(name, pin);
+    if (user) {
+      res.json({ success: true, user });
+    } else {
+      res.status(401).json({ success: false, error: "Invalid PIN" });
+    }
+  });
+
+  app.post("/api/users", (req, res) => {
+    const { id, name, pin, role } = req.body;
+    const insert = db.prepare("INSERT INTO users (id, name, pin, role) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, pin=excluded.pin, role=excluded.role");
+    insert.run(id, name, pin, role || 'waiter');
+    res.json({ success: true });
+  });
+
+  // --- Table Requests Routes (Waiter Conflicts) ---
+  app.get("/api/table-requests/:tableId", (req, res) => {
+    const requests = db.prepare("SELECT * FROM table_requests WHERE table_id = ? AND status = 'pending'").all(req.params.tableId);
+    res.json(requests.map((r: any) => ({ ...r, items: JSON.parse(r.items_json) })));
+  });
+
+  app.post("/api/table-requests", (req, res) => {
+    const { tableId, fromUserName, items } = req.body;
+    const id = Math.random().toString(36).substr(2, 9);
+    db.prepare("INSERT INTO table_requests (id, table_id, from_user_name, items_json) VALUES (?, ?, ?, ?)")
+      .run(id, tableId, fromUserName, JSON.stringify(items));
+    res.json({ success: true });
+  });
+
+  app.post("/api/table-requests/:id/resolve", (req, res) => {
+    const { action } = req.body; // 'approve' or 'reject'
+    db.prepare("UPDATE table_requests SET status = ? WHERE id = ?").run(action === 'approve' ? 'approved' : 'rejected', req.params.id);
     res.json({ success: true });
   });
 
@@ -190,14 +431,22 @@ async function startServer() {
   });
 
   app.post("/api/orders/add-item", (req, res) => {
-    const { tableId, item } = req.body;
+    const { tableId, item, waiterName } = req.body;
     
-    let order = db.prepare("SELECT id FROM orders WHERE table_id = ? AND status = 'OPEN'").get(tableId) as any;
+    let order = db.prepare("SELECT id, waiter_name FROM orders WHERE table_id = ? AND status = 'OPEN'").get(tableId) as any;
     
+    if (order && order.waiter_name !== waiterName) {
+      // Table is owned by another waiter, send request instead
+      const requestId = Math.random().toString(36).substr(2, 9);
+      db.prepare("INSERT INTO table_requests (id, table_id, from_user_name, items_json) VALUES (?, ?, ?, ?)")
+        .run(requestId, tableId, waiterName, JSON.stringify([item]));
+      return res.json({ success: true, isRequest: true, ownerName: order.waiter_name });
+    }
+
     if (!order) {
       const orderId = Math.random().toString(36).substr(2, 9);
-      db.prepare("INSERT INTO orders (id, table_id) VALUES (?, ?)").run(orderId, tableId);
-      order = { id: orderId };
+      db.prepare("INSERT INTO orders (id, table_id, waiter_name) VALUES (?, ?, ?)").run(orderId, tableId, waiterName || 'Mesero');
+      order = { id: orderId, waiter_name: waiterName || 'Mesero' };
     }
 
     const insertItem = db.prepare(`
@@ -215,7 +464,7 @@ async function startServer() {
       item.notes
     );
 
-    res.json({ success: true });
+    res.json({ success: true, order });
   });
 
   app.post("/api/orders/close", (req, res) => {
@@ -235,6 +484,12 @@ async function startServer() {
     } else {
       db.prepare("UPDATE order_items SET quantity = ? WHERE order_id = ? AND id = ?").run(quantity, orderId, orderItemId);
     }
+    res.json({ success: true });
+  });
+
+  app.post("/api/orders/update-item-status", (req, res) => {
+    const { orderId, orderItemId, status } = req.body;
+    db.prepare("UPDATE order_items SET status = ? WHERE order_id = ? AND id = ?").run(status, orderId, orderItemId);
     res.json({ success: true });
   });
 

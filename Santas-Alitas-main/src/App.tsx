@@ -24,16 +24,14 @@ import {
   DollarSign,
   Clock,
   Beer,
-  ChefHat
+  ChefHat,
+  AlertCircle,
+  Lock
 } from 'lucide-react';
 import { SAUCES, FROSTING, SOFT_DRINKS, DIPS, BEER_OPTIONS, ICE_OPTIONS, WATER_TYPE_OPTIONS, TEA_OPTIONS } from './data';
-import { Product, OrderItem, Category } from './types';
+import { Product, OrderItem, Category, DbCategory, DbModifier, DbPromotion } from './types';
 import LOGO_URL from './assets/santas-alitas-logo.svg';
 
-const CATEGORIES: (Category | 'TODOS')[] = [
-  'TODOS', 'SNACKS', 'ESPECIALES', 'ALITAS', 'BONELESS', 'DIPS', 'HAMBURGUESAS', 
-  'MICHELADAS', 'CERVEZAS', 'SIN ALCOHOL', 'COMBOS', 'POSTRES Y CAFÉ'
-];
 
 const ACCENT_COLORS = [
   { name: 'Naranja', value: '#ea580c', class: 'orange' },
@@ -47,43 +45,133 @@ const ACCENT_COLORS = [
 ];
 
 function useLongPress(onLongPress: (e: any) => void, onClick: () => void, ms = 500) {
-  const [startLongPress, setStartLongPress] = useState(false);
+  const longPressTriggered = React.useRef(false);
+  const timer = React.useRef<any>(null);
 
-  useEffect(() => {
-    let timerId: any;
-    if (startLongPress) {
-      timerId = setTimeout(() => {
-        onLongPress(null);
-        setStartLongPress(false);
-      }, ms);
-    } else {
-      clearTimeout(timerId);
-    }
+  const start = () => {
+    longPressTriggered.current = false;
+    timer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      onLongPress(null);
+    }, ms);
+  };
 
-    return () => clearTimeout(timerId);
-  }, [startLongPress, onLongPress, ms]);
-
-  return {
-    onMouseDown: () => setStartLongPress(true),
-    onMouseUp: () => {
-      if (startLongPress) {
-        onClick();
-      }
-      setStartLongPress(false);
-    },
-    onMouseLeave: () => setStartLongPress(false),
-    onTouchStart: () => setStartLongPress(true),
-    onTouchEnd: () => {
-      if (startLongPress) {
-        onClick();
-      }
-      setStartLongPress(false);
-    },
-    onContextMenu: (e: any) => {
-      e.preventDefault();
-      onLongPress(e);
+  const stop = (fireClick: boolean) => {
+    clearTimeout(timer.current);
+    if (fireClick && !longPressTriggered.current) {
+      onClick();
     }
   };
+
+  return {
+    onMouseDown: start,
+    onMouseUp: () => stop(true),
+    onMouseLeave: () => stop(false),
+    onTouchStart: start,
+    onTouchEnd: () => stop(true),
+    onContextMenu: (e: any) => { e.preventDefault(); },
+  };
+}
+
+function LoginScreen({ users, onLogin, theme }: { users: any[], onLogin: (user: any) => void, theme: string }) {
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser || !pin) return;
+    
+    try {
+      const res = await fetch('/api/users/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: selectedUser.name, pin })
+      });
+      const data = await res.json();
+      if (data.success && data.user.id === selectedUser.id) {
+        onLogin(data.user);
+      } else {
+        setError('PIN incorrecto o usuario no coincide');
+        setPin('');
+      }
+    } catch (err) {
+      setError('Error al iniciar sesión');
+    }
+  };
+
+  return (
+    <div className={`min-h-screen flex items-center justify-center p-4 transition-colors ${theme === 'dark' ? 'bg-stone-950 text-white' : 'bg-stone-50 text-stone-900'}`}>
+      <div className={`w-full max-w-md p-8 rounded-3xl shadow-2xl space-y-8 ${theme === 'dark' ? 'bg-stone-900 border border-stone-800' : 'bg-white border border-stone-100'}`}>
+        <div className="text-center space-y-2">
+          <img src="/santas-alitas-logo.svg" alt="Santas Alitas" className="h-24 mx-auto drop-shadow-2xl mb-4" />
+          <h1 className="text-3xl font-black tracking-tight">Bienvenido</h1>
+          <p className="text-stone-500">Selecciona tu usuario e ingresa tu contraseña</p>
+        </div>
+
+        {error && (
+          <div className="bg-red-500/10 text-red-500 p-4 rounded-xl text-center font-bold text-sm">
+            {error}
+          </div>
+        )}
+
+        {users.length === 0 ? (
+          <div className="text-center p-6 bg-accent/10 text-accent rounded-xl font-bold">
+            Cargando usuarios o servidor desconectado...
+          </div>
+        ) : !selectedUser ? (
+          <div className="grid grid-cols-2 gap-3">
+            {users.map(u => (
+              <button
+                key={u.id}
+                onClick={() => { setSelectedUser(u); setError(''); setPin(''); }}
+                className={`p-4 rounded-2xl border text-center font-bold transition-all hover:scale-105 active:scale-95 ${theme === 'dark' ? 'bg-stone-800 border-stone-700 hover:border-accent' : 'bg-stone-50 border-stone-200 hover:border-accent'}`}
+              >
+                {u.name}
+                <span className={`block text-[10px] uppercase tracking-widest mt-1 ${theme === 'dark' ? 'text-stone-500' : 'text-stone-400'}`}>
+                  {u.role}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div className="text-center">
+              <p className="text-stone-500 text-sm mb-1">Ingresando como:</p>
+              <h2 className="text-xl font-bold text-accent">{selectedUser.name}</h2>
+              <button 
+                type="button" 
+                onClick={() => { setSelectedUser(null); setError(''); }}
+                className="text-xs text-stone-400 underline mt-2"
+              >
+                Cambiar usuario
+              </button>
+            </div>
+            
+            <input
+              type="text"
+              placeholder="Contraseña"
+              value={pin}
+              onChange={e => {
+                setPin(e.target.value);
+                setError('');
+              }}
+              className={`w-full text-center text-xl font-bold p-4 rounded-2xl outline-none transition-colors border-2 ${theme === 'dark' ? 'bg-stone-950 border-stone-800 focus:border-accent text-white' : 'bg-stone-50 border-stone-200 focus:border-accent text-stone-900'}`}
+              autoFocus
+            />
+
+            <button
+              type="submit"
+              disabled={!pin}
+              className="w-full bg-accent text-white p-4 rounded-2xl font-bold text-lg shadow-lg shadow-accent/20 disabled:opacity-50 transition-all active:scale-95"
+            >
+              Entrar
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -94,6 +182,7 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showOrderSent, setShowOrderSent] = useState(false);
+  const [showRequestSent, setShowRequestSent] = useState(false);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -108,30 +197,39 @@ export default function App() {
   const menuReady = React.useRef(false);
   
   // Data from API
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [usersList, setUsersList] = useState<any[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [tables, setTables] = useState<{id: string, x: number, y: number, isOccupied: boolean, alias?: string}[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [editingOrderItem, setEditingOrderItem] = useState<any>(null);
+  
+  // Advanced Admin State
+  const [categories, setCategories] = useState<DbCategory[]>([]);
+  const [modifiersList, setModifiersList] = useState<DbModifier[]>([]);
+  const [promotionsList, setPromotionsList] = useState<DbPromotion[]>([]);
+
 
   useEffect(() => {
-    // Load settings from DB
-    fetch('/api/settings').then(r => r.json()).then((s: Record<string, string>) => {
-      if (s.theme) setTheme(s.theme as 'light' | 'dark');
-      if (s.accentColor) setAccentColor(s.accentColor);
-      if (s.isDousonMode) setIsDousonMode(s.isDousonMode === 'true');
-      // Apply immediately
-      document.documentElement.classList.toggle('dark', (s.theme || 'light') === 'dark');
-      document.documentElement.style.setProperty('--accent-color', s.accentColor || '#ea580c');
-      settingsLoaded.current = true;
-    }).catch(() => { settingsLoaded.current = true; });
-  }, []);
+    if (currentUser) {
+      // Load user settings from DB
+      fetch(`/api/settings?userId=${currentUser.id}`).then(r => r.json()).then((s: any) => {
+        if (s.theme) setTheme(s.theme as 'light' | 'dark');
+        if (s.accentColor) setAccentColor(s.accentColor);
+        // Apply immediately
+        document.documentElement.classList.toggle('dark', (s.theme || 'light') === 'dark');
+        document.documentElement.style.setProperty('--accent-color', s.accentColor || '#ea580c');
+        settingsLoaded.current = true;
+      }).catch(() => { settingsLoaded.current = true; });
+    }
+  }, [currentUser]);
 
   const saveSetting = (key: string, value: string) => {
-    if (!settingsLoaded.current) return;
+    if (!settingsLoaded.current || !currentUser) return;
     fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value })
+      body: JSON.stringify({ key, value, userId: currentUser.id })
     }).catch(() => {});
   };
 
@@ -167,16 +265,28 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [prodRes, tableRes] = await Promise.all([
+      const [prodRes, tableRes, usersRes, catRes, modRes, promoRes] = await Promise.all([
         fetch('/api/products'),
-        fetch('/api/tables')
+        fetch('/api/tables'),
+        fetch('/api/users'),
+        fetch('/api/categories'),
+        fetch('/api/modifiers'),
+        fetch('/api/promotions')
       ]);
-      const [prodData, tableData] = await Promise.all([
+      const [prodData, tableData, usersData, catData, modData, promoData] = await Promise.all([
         prodRes.json(),
-        tableRes.json()
+        tableRes.json(),
+        usersRes.json(),
+        catRes.json(),
+        modRes.json(),
+        promoRes.json()
       ]);
       setProducts(prodData);
       setTables(tableData);
+      setUsersList(usersData);
+      setCategories(catData);
+      setModifiersList(modData);
+      setPromotionsList(promoData);
     } catch (error) {
       console.error("Error fetching data:", error);
     }
@@ -295,9 +405,9 @@ export default function App() {
   // Filtered products based on search or category
   const filteredProducts = useMemo(() => {
     if (searchTerm.trim()) {
-      return products.filter(p => 
+      return products.filter(p =>
         p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.description.toLowerCase().includes(searchTerm.toLowerCase())
+        (p.description || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
     if (activeCategory === 'TODOS') return products;
@@ -319,17 +429,26 @@ export default function App() {
     };
 
     try {
-      await fetch('/api/orders/add-item', {
+      const res = await fetch('/api/orders/add-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tableId: selectedTable, item: newItem })
+        body: JSON.stringify({ tableId: selectedTable, item: newItem, waiterName: currentUser?.name || 'Mesero' })
       });
+      const data = await res.json();
       
       await fetchActiveOrder(selectedTable);
       await fetchData(); // Update table occupancy
+
+      // Keep user in the menu, mark ready immediately
+      menuReady.current = true;
       
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 2000);
+      if (data.isRequest) {
+        setShowRequestSent(true);
+        setTimeout(() => setShowRequestSent(false), 3000);
+      } else {
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 2000);
+      }
     } catch (error) {
       console.error("Error adding to order:", error);
     }
@@ -354,6 +473,24 @@ export default function App() {
       await fetchActiveOrder(selectedTable!);
     } catch (error) {
       console.error("Error updating quantity:", error);
+    }
+  };
+
+  const toggleItemStatus = async (orderItemId: string, status: string) => {
+    if (!activeOrder) return;
+    try {
+      await fetch('/api/orders/update-item-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: activeOrder.id,
+          orderItemId,
+          status
+        })
+      });
+      await fetchActiveOrder(selectedTable!);
+    } catch (error) {
+      console.error("Error updating item status:", error);
     }
   };
 
@@ -426,8 +563,8 @@ export default function App() {
   const [isProductManagerOpen, setIsProductManagerOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
 
-  const saveProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveProduct = async (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
     if (!editingProduct?.name || !editingProduct?.price || !editingProduct?.category) return;
     
     await fetch('/api/products', {
@@ -439,10 +576,26 @@ export default function App() {
     fetchData();
   };
 
+  if (!currentUser) {
+    return <LoginScreen users={usersList} onLogin={setCurrentUser} theme={theme} />;
+  }
+
   if (!selectedTable) {
     return (
       <div className={`min-h-screen flex flex-col p-4 sm:p-6 transition-colors duration-300 ${theme === 'dark' ? 'bg-stone-950 text-white' : 'bg-stone-50 text-stone-900'}`}>
-        <header className={`flex flex-col items-center p-6 sm:p-10 border-b transition-colors ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-100'}`}>
+        <header className={`flex flex-col items-center justify-between p-6 sm:p-10 border-b transition-colors ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-100'}`}>
+          <div className="w-full flex justify-between items-start mb-4">
+            <div className={`px-4 py-2 rounded-xl flex items-center gap-2 font-bold ${theme === 'dark' ? 'bg-stone-800 text-stone-300' : 'bg-stone-100 text-stone-600'}`}>
+              <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+              {currentUser.name}
+            </div>
+            <button 
+              onClick={() => setCurrentUser(null)}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${theme === 'dark' ? 'border-stone-700 text-stone-400 hover:text-white hover:bg-stone-800' : 'border-stone-200 text-stone-500 hover:text-stone-900 hover:bg-stone-100'}`}
+            >
+              Cerrar Sesión
+            </button>
+          </div>
           <img 
             src={LOGO_URL} 
             alt="Santas Alitas" 
@@ -496,7 +649,7 @@ export default function App() {
             </div>
           </div>
 
-          {isAdminMode && (
+          {isAdminMode && currentUser.role === 'admin' && (
             <div className="mt-6 flex flex-wrap justify-center gap-4">
               <button 
                 onClick={addTable}
@@ -614,18 +767,20 @@ export default function App() {
                         <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isDousonMode ? 'left-7' : 'left-1'}`} />
                       </button>
                     </div>
-                    <div className="flex items-center justify-between p-4 rounded-2xl bg-stone-50 dark:bg-stone-800">
-                      <div className="flex flex-col">
-                        <span className="font-bold">Modo Administrador</span>
-                        <span className="text-[10px] text-stone-400 uppercase font-black">Gestionar mesas y productos</span>
+                    {currentUser.role === 'admin' && (
+                      <div className="flex items-center justify-between p-4 rounded-2xl bg-stone-50 dark:bg-stone-800">
+                        <div className="flex flex-col">
+                          <span className="font-bold">Modo Administrador</span>
+                          <span className="text-[10px] text-stone-400 uppercase font-black">Gestionar mesas y productos</span>
+                        </div>
+                        <button 
+                          onClick={() => setIsAdminMode(!isAdminMode)}
+                          className={`w-12 h-6 rounded-full transition-colors relative ${isAdminMode ? 'bg-red-600' : 'bg-stone-300 dark:bg-stone-700'}`}
+                        >
+                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isAdminMode ? 'left-7' : 'left-1'}`} />
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => setIsAdminMode(!isAdminMode)}
-                        className={`w-12 h-6 rounded-full transition-colors relative ${isAdminMode ? 'bg-red-600' : 'bg-stone-300 dark:bg-stone-700'}`}
-                      >
-                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isAdminMode ? 'left-7' : 'left-1'}`} />
-                      </button>
-                    </div>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -680,7 +835,7 @@ export default function App() {
                           className={`w-full rounded-xl p-3 outline-none border transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white' : 'bg-stone-50 border-stone-200'}`}
                         >
                           <option value="">Seleccionar...</option>
-                          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                         </select>
                       </div>
                       <div className="space-y-1">
@@ -787,7 +942,7 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${theme === 'dark' ? 'bg-stone-950 text-white' : 'bg-stone-50 text-stone-900'} font-sans flex flex-col pb-24`}>
+    <div className={`h-screen flex flex-col transition-colors duration-300 ${theme === 'dark' ? 'bg-stone-950 text-white' : 'bg-stone-50 text-stone-900'} font-sans`}>
       {/* Top Header Logo (Only logo, search bar removed from here) */}
       <header className={`border-b sticky top-0 z-30 shadow-sm transition-colors ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'} p-4 flex justify-center`}>
         <img 
@@ -805,29 +960,27 @@ export default function App() {
         />
       </header>
 
-      {/* Category Tabs */}
-      {!searchTerm && (
-        <div className={`border-b sticky top-[72px] sm:top-[88px] z-20 overflow-x-auto no-scrollbar transition-colors ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}>
-          <div className="flex p-2 gap-2 min-w-max max-w-2xl mx-auto">
-            {CATEGORIES.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                  activeCategory === cat 
-                    ? 'bg-accent text-white shadow-md' 
-                    : theme === 'dark' ? 'bg-stone-800 text-stone-400 hover:bg-stone-700' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
+      {/* Category Tabs - always sticky */}
+      <div className={`border-b z-20 overflow-x-auto no-scrollbar transition-colors flex-shrink-0 ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}>
+        <div className="flex p-2 gap-2 min-w-max max-w-2xl mx-auto">
+          {['TODOS', ...categories.map(c => c.name)].map(cat => (
+            <button
+              key={cat}
+              onClick={() => { setActiveCategory(cat); setSearchTerm(''); }}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                activeCategory === cat 
+                  ? 'bg-accent text-white shadow-md' 
+                  : theme === 'dark' ? 'bg-stone-800 text-stone-400 hover:bg-stone-700' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
-      {/* Product List */}
-      <main className="flex-1 p-4 max-w-2xl mx-auto w-full">
+      {/* Product List - scrollable */}
+      <main className="flex-1 overflow-y-auto p-4 pb-28 max-w-2xl mx-auto w-full">
         <div className="grid gap-4">
           {filteredProducts.map(product => (
             <motion.div
@@ -839,15 +992,20 @@ export default function App() {
                 if (!menuReady.current) return;
                 setSelectedProduct(product);
               }}
-              className={`p-4 rounded-2xl border shadow-sm hover:shadow-md transition-all cursor-pointer flex justify-between items-center group ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}
+              className={`p-4 rounded-2xl border shadow-sm hover:shadow-lg transition-all cursor-pointer flex justify-between items-center group active:scale-[0.98] ${theme === 'dark' ? 'bg-stone-900 border-stone-800 hover:border-accent/40' : 'bg-white border-stone-100 hover:border-accent/30 hover:shadow-accent/5'}`}
             >
-              <div className="flex-1">
-                <h3 className={`font-bold text-lg ${theme === 'dark' ? 'text-stone-100' : 'text-stone-800'}`}>{product.name}</h3>
-                <p className="text-stone-500 text-sm line-clamp-2 mt-1">{product.description}</p>
-                <span className="text-accent font-bold mt-2 block">${product.price}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h3 className={`font-bold text-base leading-tight ${theme === 'dark' ? 'text-stone-100' : 'text-stone-800'}`}>{product.name}</h3>
+                  <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full flex-shrink-0 ${theme === 'dark' ? 'bg-stone-800 text-stone-500' : 'bg-stone-100 text-stone-400'}`}>{product.category}</span>
+                </div>
+                {product.description && (
+                  <p className="text-stone-400 text-xs line-clamp-1 mt-0.5">{product.description}</p>
+                )}
+                <span className="text-accent font-black text-base mt-2 block">${product.price}</span>
               </div>
-              <div className={`ml-4 p-2 rounded-xl transition-colors ${theme === 'dark' ? 'bg-stone-800 group-hover:bg-accent/20' : 'bg-stone-50 group-hover:bg-accent/10'}`}>
-                <Plus className="w-6 h-6 text-stone-400 group-hover:text-accent" />
+              <div className={`ml-4 w-10 h-10 flex-shrink-0 rounded-xl flex items-center justify-center transition-all ${theme === 'dark' ? 'bg-stone-800 group-hover:bg-accent group-hover:scale-110' : 'bg-stone-50 group-hover:bg-accent group-hover:scale-110'}`}>
+                <Plus className={`w-5 h-5 transition-colors ${theme === 'dark' ? 'text-stone-400 group-hover:text-white' : 'text-stone-400 group-hover:text-white'}`} />
               </div>
             </motion.div>
           ))}
@@ -937,7 +1095,12 @@ export default function App() {
             order={activeOrder?.items || []} 
             total={total}
             tableId={selectedTable}
-            onClose={() => setIsOrderViewOpen(false)}
+            currentUser={currentUser}
+            onClose={() => {
+              setIsOrderViewOpen(false);
+              fetchActiveOrder(selectedTable || ''); // Refresh if approved requests behind the scenes
+              fetchData();
+            }}
             onRemove={removeFromOrder}
             onUpdateQty={updateQuantity}
             onEditItem={(item: any) => {
@@ -948,6 +1111,7 @@ export default function App() {
                 setIsOrderViewOpen(false);
               }
             }}
+            onToggleItemStatus={toggleItemStatus}
             onSend={() => {
               setShowOrderSent(true);
               setTimeout(() => setShowOrderSent(false), 3000);
@@ -956,6 +1120,7 @@ export default function App() {
             onClear={() => {
               setIsOrderViewOpen(false);
             }}
+            theme={theme}
           />
         )}
       </AnimatePresence>
@@ -964,15 +1129,39 @@ export default function App() {
       <AnimatePresence>
         {(showSuccess || showOrderSent) && (
           <motion.div 
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-stone-900 text-white px-6 py-3 rounded-full flex items-center gap-2 shadow-2xl z-50 pointer-events-none"
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
           >
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-            <span className="font-medium">
-              {showOrderSent ? '¡Pedido enviado a cocina!' : 'Agregado al pedido'}
-            </span>
+            <div className={`px-6 py-3 rounded-2xl flex items-center gap-3 shadow-2xl border ${theme === 'dark' ? 'bg-stone-900 border-stone-800 text-white' : 'bg-white border-stone-100 text-stone-900'}`}>
+              <div className="w-7 h-7 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-4 h-4 text-white" />
+              </div>
+              <span className="font-bold text-sm">
+                {showOrderSent ? 'Pedido mandado a barra/cocina' : 'Agregado a la orden'}
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showRequestSent && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
+          >
+            <div className={`px-6 py-3 rounded-2xl flex items-center gap-3 shadow-2xl border bg-accent text-white`}>
+              <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-4 h-4 text-white" />
+              </div>
+              <span className="font-bold text-sm">
+                ¡Solicitud enviada al mesero de la mesa!
+              </span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1063,7 +1252,14 @@ function ModifierModal({ product, initialNotes, onClose, onConfirm, theme }: {
     const listMods = product.modifiers?.filter(m => m.type === 'list') || [];
     listMods.forEach((m, idx) => {
       if (selectedListOptions[idx]) {
-        mods.push({ name: 'Selección', value: selectedListOptions[idx] });
+        // Infer meaningful name
+        let modName = 'Selección';
+        if (m.options?.some((o: any) => o.name === 'Con Hielo' || o.name === 'Sin Hielo')) modName = 'Hielo';
+        else if (m.options?.some((o: any) => o.name === 'Natural' || o.name === 'Mineral')) modName = 'Agua';
+        else if (m.options?.some((o: any) => o.name === 'Té Verde' || o.name === 'Té Negro')) modName = 'Sabor';
+        else if (m.options?.some((o: any) => o.name === 'Corona' || o.name === 'Victoria')) modName = 'Cerveza';
+        else if (m.options?.some((o: any) => o.name === 'Coca Cola' || o.name === 'Sprite')) modName = 'Refresco';
+        mods.push({ name: modName, value: selectedListOptions[idx] });
       }
     });
 
@@ -1108,12 +1304,15 @@ function ModifierModal({ product, initialNotes, onClose, onConfirm, theme }: {
         initial={{ y: '100%' }}
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
-        className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col max-h-[90vh]"
+        className={`${theme === 'dark' ? 'bg-stone-900' : 'bg-white'} w-full max-w-lg rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col max-h-[90vh] shadow-2xl`}
       >
         <div className={`p-6 border-b flex justify-between items-center sticky top-0 z-10 transition-colors ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-100'}`}>
-          <div>
-            <h2 className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-stone-800'}`}>{product.name}</h2>
-            <p className="text-stone-500 text-sm">Personaliza tu pedido</p>
+          <div className="flex-1 pr-4">
+            <h2 className={`text-2xl font-bold leading-tight ${theme === 'dark' ? 'text-white' : 'text-stone-800'}`}>{product.name}</h2>
+            {product.description && (
+              <p className="text-stone-400 text-xs mt-1 line-clamp-2">{product.description}</p>
+            )}
+            <p className="text-accent font-black mt-2">${product.price.toFixed(2)}</p>
           </div>
           <button onClick={onClose} className={`p-2 rounded-full transition-colors ${theme === 'dark' ? 'bg-stone-800 hover:bg-stone-700 text-white' : 'bg-stone-100 hover:bg-stone-200'}`}>
             <X className="w-6 h-6" />
@@ -1192,26 +1391,37 @@ function ModifierModal({ product, initialNotes, onClose, onConfirm, theme }: {
           )}
 
           {/* List Section */}
-          {product.modifiers?.filter(m => m.type === 'list').map((m, idx) => (
-            <div key={idx} className="space-y-4">
-              <h3 className={`font-bold text-lg ${theme === 'dark' ? 'text-stone-200' : 'text-stone-800'}`}>Selecciona una opción</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {m.options?.map((opt: any) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setSelectedListOptions(prev => ({ ...prev, [idx]: opt.name }))}
-                    className={`p-3 rounded-xl text-sm font-medium border transition-all ${
-                      selectedListOptions[idx] === opt.name
-                        ? 'bg-accent border-accent text-white shadow-md'
-                        : theme === 'dark' ? 'bg-stone-900 border-stone-800 text-stone-400 hover:border-accent' : 'bg-white border-stone-200 text-stone-600 hover:border-accent'
-                    }`}
-                  >
-                    {opt.name}
-                  </button>
-                ))}
+          {product.modifiers?.filter(m => m.type === 'list').map((m, idx) => {
+            // Infer a meaningful label from the options
+            const firstOpt = m.options?.[0];
+            let label = 'Selecciona una opción';
+            if (m.options?.some((o: any) => o.name === 'Con Hielo' || o.name === 'Sin Hielo')) label = 'Hielo';
+            else if (m.options?.some((o: any) => o.name === 'Natural' || o.name === 'Mineral')) label = 'Tipo de agua';
+            else if (m.options?.some((o: any) => o.name === 'Té Verde' || o.name === 'Té Negro')) label = 'Sabor de té';
+            else if (m.options?.some((o: any) => o.name === 'Corona' || o.name === 'Victoria')) label = 'Marca de cerveza';
+            else if (m.options?.some((o: any) => o.name === 'Coca Cola' || o.name === 'Sprite')) label = 'Refresco';
+            else if (firstOpt) label = 'Selecciona';
+            return (
+              <div key={idx} className="space-y-4">
+                <h3 className={`font-bold text-lg ${theme === 'dark' ? 'text-stone-200' : 'text-stone-800'}`}>{label}</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {m.options?.map((opt: any) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => setSelectedListOptions(prev => ({ ...prev, [idx]: opt.name }))}
+                      className={`p-3 rounded-xl text-sm font-medium border transition-all ${
+                        selectedListOptions[idx] === opt.name
+                          ? 'bg-accent border-accent text-white shadow-md'
+                          : theme === 'dark' ? 'bg-stone-900 border-stone-800 text-stone-400 hover:border-accent' : 'bg-white border-stone-200 text-stone-600 hover:border-accent'
+                      }`}
+                    >
+                      {opt.name}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {/* Bucket Section */}
           {product.modifiers?.filter(m => m.type === 'bucket').map((m, idx) => {
@@ -1281,6 +1491,7 @@ function ModifierModal({ product, initialNotes, onClose, onConfirm, theme }: {
 
         <div className={`p-6 border-t sticky bottom-0 transition-colors ${theme === 'dark' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-100'}`}>
           <button
+            type="button"
             onClick={handleConfirm}
             disabled={!isFormValid}
             className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg transition-all ${
@@ -1297,7 +1508,50 @@ function ModifierModal({ product, initialNotes, onClose, onConfirm, theme }: {
   );
 }
 
-function OrderView({ order, total, tableId, onClose, onRemove, onUpdateQty, onEditItem, onClear, onSend, onCloseAccount, theme }: any) {
+function OrderView({ order, total, tableId, onClose, onRemove, onUpdateQty, onEditItem, onToggleItemStatus, onClear, onSend, onCloseAccount, theme, currentUser }: any) {
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+
+  const fetchRequests = async () => {
+    if (!tableId) return;
+    try {
+      const res = await fetch(`/api/table-requests/${tableId}`);
+      const data = await res.json();
+      setPendingRequests(data);
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => {
+    fetchRequests();
+    // Refresh interval for requests inside the open modal
+    const interval = setInterval(fetchRequests, 5000);
+    return () => clearInterval(interval);
+  }, [tableId]);
+
+  const resolveRequest = async (requestId: string, action: 'approve' | 'reject', items: any[]) => {
+    try {
+      await fetch(`/api/table-requests/${requestId}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+      // If approved, we need to add each item to the actual order
+      if (action === 'approve') {
+        for (const item of items) {
+          await fetch('/api/orders/add-item', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tableId, item, waiterName: currentUser?.name || 'Mesero' })
+          });
+        }
+        // Force refresh of the main order data in App.tsx by calling onClear or a specific onRefresh prop 
+        // We will just invoke onClose() to let the user see the updated table state outside, or ideally just trigger a reload.
+        // Easiest is to let the parent know we resolved a request.
+      }
+      fetchRequests();
+      if (action === 'approve') onClose(); // Close and let App.tsx refetch active order naturally 
+    } catch (e) { console.error(e); }
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -1331,30 +1585,77 @@ function OrderView({ order, total, tableId, onClose, onRemove, onUpdateQty, onEd
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          
+          {pendingRequests.length > 0 && (
+            <div className="space-y-3 mb-8">
+              <h3 className="text-red-500 font-bold flex items-center gap-2">
+                <AlertCircle className="w-5 h-5" />
+                Solicitudes de otros meseros
+              </h3>
+              {pendingRequests.map(req => (
+                <div key={req.id} className={`p-4 rounded-2xl border-2 border-red-500/30 ${theme === 'dark' ? 'bg-red-500/10' : 'bg-red-50'}`}>
+                  <p className="text-sm font-bold mb-2">De: {req.from_user_name}</p>
+                  <ul className="text-xs space-y-1 mb-3">
+                    {req.items.map((item: any, idx: number) => (
+                      <li key={idx} className="flex justify-between">
+                        <span>{item.quantity}x {item.name}</span>
+                        <span className="font-bold">${item.price * item.quantity}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => resolveRequest(req.id, 'reject', req.items)}
+                      className="flex-1 py-2 rounded-xl font-bold bg-stone-300 text-stone-700 hover:bg-stone-400 transition-colors"
+                    >
+                      X Rechazar
+                    </button>
+                    <button 
+                      onClick={() => resolveRequest(req.id, 'approve', req.items)}
+                      className="flex-1 py-2 rounded-xl font-bold bg-accent text-white hover:bg-accent/80 transition-colors"
+                    >
+                      ✓ Aprobar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {order.length === 0 ? (
             <div className="text-center py-20 text-stone-400">
               <ClipboardList className="w-16 h-16 mx-auto mb-4 opacity-10" />
               <p className="text-lg">La comanda está vacía</p>
             </div>
           ) : (
-            order.map(item => (
-              <div key={item.id} className="flex gap-4 group">
-                <div className="flex-1 cursor-pointer hover:bg-stone-50 dark:hover:bg-stone-800/50 p-2 -m-2 rounded-xl transition-colors" onClick={(e) => {
+            order.map((item: any) => {
+              const isDelivered = item.status === 'delivered';
+              return (
+              <div key={item.id} className={`flex gap-4 group transition-all duration-500 ${isDelivered ? 'opacity-50' : 'opacity-100'}`}>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onToggleItemStatus(item.id, isDelivered ? 'pending' : 'delivered'); }}
+                  className={`w-6 h-6 mt-1 flex-shrink-0 rounded-md border-2 flex items-center justify-center transition-colors ${isDelivered ? 'bg-emerald-500 border-emerald-500' : 'border-stone-400 dark:border-stone-600'}`}
+                >
+                  {isDelivered && <CheckCircle2 className="w-4 h-4 text-white" />}
+                </button>
+                <div className={`flex-1 cursor-pointer hover:bg-stone-50 dark:hover:bg-stone-800/50 p-2 -m-2 rounded-xl transition-colors ${isDelivered ? 'line-through decoration-stone-400' : ''}`} onClick={(e) => {
                   if ((e.target as HTMLElement).closest('button')) return;
                   onEditItem(item);
                 }}>
                   <div className="flex justify-between">
                     <h4 className="font-bold flex items-center gap-2">
                        {item.name}
-                       <Settings className="w-4 h-4 text-stone-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                       <Settings className={`w-4 h-4 text-stone-400 opacity-0 group-hover:opacity-100 transition-opacity ${isDelivered ? 'hidden' : ''}`} />
                     </h4>
-                    <span className="font-bold text-accent">${item.price * item.quantity}</span>
+                    <span className="font-bold text-accent">
+                      ${((item.price + (item.modifiers?.reduce((s: number, m: any) => s + (m.extraPrice || 0), 0) || 0)) * item.quantity).toFixed(2)}
+                    </span>
                   </div>
                   {item.modifiers?.length > 0 && (
                     <div className="mt-1 space-y-1">
                       {item.modifiers.map((m: any, idx: number) => (
                         <p key={idx} className="text-xs text-stone-500 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                          <CheckCircle2 className={`w-3 h-3 ${isDelivered ? 'text-stone-400' : 'text-emerald-500'}`} />
                           <span className="font-medium">{m.name}:</span> {Array.isArray(m.value) ? m.value.join(', ') : m.value}
                           {m.extraPrice ? ` (+ $${m.extraPrice})` : ''}
                         </p>
@@ -1364,7 +1665,7 @@ function OrderView({ order, total, tableId, onClose, onRemove, onUpdateQty, onEd
                   {item.notes && (
                     <p className="text-xs italic text-stone-400 mt-1">"{item.notes}"</p>
                   )}
-                  <div className="flex items-center gap-4 mt-3">
+                  <div className={`flex items-center gap-4 mt-3 ${isDelivered ? 'pointer-events-none opacity-50' : ''}`}>
                     <div className={`flex items-center rounded-xl px-2 py-1 transition-colors ${theme === 'dark' ? 'bg-stone-800' : 'bg-stone-100'}`}>
                       <button onClick={() => onUpdateQty(item.id, -1)} className="p-1 hover:text-accent">
                         <Minus className="w-4 h-4" />
@@ -1383,7 +1684,7 @@ function OrderView({ order, total, tableId, onClose, onRemove, onUpdateQty, onEd
                   </div>
                 </div>
               </div>
-            ))
+            )})
           )}
         </div>
 
@@ -1564,16 +1865,23 @@ function HistoryModal({ history, onClose, theme }: { history: any[], onClose: ()
   const groupedHistory = useMemo(() => {
     const groups: Record<string, any[]> = {};
     history.forEach(order => {
-      const date = new Date(order.closed_at).toLocaleDateString('es-MX', { 
+      const dateStr = new Date(order.closed_at).toLocaleDateString('es-MX', { 
         weekday: 'long', 
         year: 'numeric', 
         month: 'long', 
         day: 'numeric' 
       });
-      if (!groups[date]) groups[date] = [];
-      groups[date].push(order);
+      const groupKey = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push(order);
     });
-    return Object.entries(groups);
+    
+    // Sort dates by the timestamp of the first order in the group (descending)
+    return Object.entries(groups).sort((a, b) => {
+      const timeA = new Date(a[1][0].closed_at).getTime();
+      const timeB = new Date(b[1][0].closed_at).getTime();
+      return timeB - timeA;
+    });
   }, [history]);
 
   return (
@@ -1584,56 +1892,73 @@ function HistoryModal({ history, onClose, theme }: { history: any[], onClose: ()
       className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
     >
       <motion.div 
-        initial={{ scale: 0.9, opacity: 0 }}
+        initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className={`w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh] transition-colors ${theme === 'dark' ? 'bg-stone-900 text-white' : 'bg-white text-stone-900'}`}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className={`w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[85vh] transition-colors ${theme === 'dark' ? 'bg-stone-900 text-white' : 'bg-white text-stone-900'}`}
       >
         <div className={`p-6 border-b flex justify-between items-center transition-colors ${theme === 'dark' ? 'border-stone-800' : 'border-stone-100'}`}>
-          <div className="flex items-center gap-3">
-            <History className="w-6 h-6 text-accent" />
-            <h2 className="text-2xl font-bold">Historial de Ventas</h2>
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-2xl ${theme === 'dark' ? 'bg-stone-800' : 'bg-stone-100'}`}>
+              <History className="w-6 h-6 text-accent" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Historial Completo</h2>
+              <p className="text-stone-500 text-sm">Órdenes cobradas de todas las mesas</p>
+            </div>
           </div>
-          <button onClick={onClose} className={`p-2 rounded-full transition-colors ${theme === 'dark' ? 'bg-stone-800 hover:bg-stone-700' : 'bg-stone-100 hover:bg-stone-200'}`}>
+          <button onClick={onClose} className={`p-2 rounded-full transition-colors ${theme === 'dark' ? 'hover:bg-stone-800 text-stone-400 hover:text-white' : 'hover:bg-stone-100 text-stone-500 hover:text-stone-900'}`}>
             <X className="w-6 h-6" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        <div className={`flex-1 overflow-y-auto p-6 space-y-8 ${theme === 'dark' ? 'bg-stone-950' : 'bg-stone-50'}`}>
           {history.length === 0 ? (
-            <div className="text-center py-20 text-stone-400">
-              <Clock className="w-16 h-16 mx-auto mb-4 opacity-10" />
-              <p>No hay pedidos cerrados en los últimos 7 días</p>
+            <div className="h-full flex flex-col items-center justify-center text-stone-400 space-y-4">
+              <Clock className="w-16 h-16 opacity-20" />
+              <p className="text-lg">No hay pedidos cerrados en los últimos 7 días</p>
             </div>
           ) : (
-            groupedHistory.map(([date, orders]) => (
-              <div key={date} className="space-y-4">
-                <h3 className={`text-xs font-black uppercase tracking-widest text-stone-400 border-b pb-2 transition-colors ${theme === 'dark' ? 'border-stone-800' : 'border-stone-100'}`}>{date}</h3>
-                <div className="grid gap-4">
-                  {orders.map(order => (
-                    <div key={order.id} className={`p-4 rounded-2xl border space-y-3 transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-[10px] font-black text-accent uppercase tracking-widest">Mesa {order.table_id}</span>
-                          <p className="text-xs text-stone-400">{new Date(order.closed_at).toLocaleTimeString()}</p>
+            <div className="space-y-8 max-w-3xl mx-auto">
+              {groupedHistory.map(([dateTitle, orders]) => (
+                <div key={dateTitle} className="space-y-4">
+                  <h3 className={`text-sm font-black uppercase tracking-widest sticky top-0 py-3 z-10 backdrop-blur-md transition-colors ${theme === 'dark' ? 'text-accent border-stone-800 bg-stone-950/80 border-b' : 'text-accent border-stone-200 bg-stone-50/80 border-b'}`}>
+                    {dateTitle}
+                  </h3>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {orders.map(order => (
+                      <div key={order.id} className={`p-5 rounded-2xl border space-y-4 transition-colors hover:shadow-lg hover:-translate-y-0.5 transform duration-200 ${theme === 'dark' ? 'bg-stone-900 border-stone-800 hover:border-stone-700' : 'bg-white border-stone-200 hover:border-stone-300'}`}>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md mb-2 ${theme === 'dark' ? 'bg-stone-800 text-stone-400' : 'bg-stone-100 text-stone-500'}`}>
+                              <MapIcon className="w-3 h-3" /> Mesa {order.table_id}
+                            </span>
+                            <div className="flex items-center gap-2 text-xs text-stone-400">
+                              <Clock className="w-3 h-3" />
+                              {new Date(order.closed_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className={`block font-black text-xl flex items-center justify-end gap-1 ${theme === 'dark' ? 'text-white' : 'text-stone-900'}`}>
+                              <DollarSign className="w-4 h-4 text-emerald-500" />
+                              {(order.total + order.tip).toFixed(2)}
+                            </span>
+                            {order.tip > 0 && <span className="text-[10px] font-bold text-emerald-500 tracking-wide mt-1 block">PROPINA: ${order.tip.toFixed(2)}</span>}
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className={`font-black text-lg ${theme === 'dark' ? 'text-white' : 'text-stone-900'}`}>${(order.total + order.tip).toFixed(2)}</p>
-                          <p className="text-[10px] text-stone-400">Propina: ${order.tip.toFixed(2)}</p>
+                        <div className={`pt-3 border-t flex flex-wrap gap-2 ${theme === 'dark' ? 'border-stone-800' : 'border-stone-100'}`}>
+                          {order.items.map((item: any, idx: number) => (
+                            <span key={idx} className={`text-[10px] font-medium px-2 py-1 rounded-lg border transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-stone-300' : 'bg-stone-50 border-stone-200 text-stone-600'}`}>
+                              {item.quantity}x {item.name}
+                            </span>
+                          ))}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {order.items.map((item: any, idx: number) => (
-                          <span key={idx} className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${theme === 'dark' ? 'bg-stone-700 border-stone-600 text-stone-300' : 'bg-white border-stone-200 text-stone-600'}`}>
-                            {item.quantity}x {item.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       </motion.div>
