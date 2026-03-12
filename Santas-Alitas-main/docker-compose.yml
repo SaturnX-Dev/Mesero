@@ -2,8 +2,7 @@ version: '3.8'
 
 services:
   mesero-app:
-    build: .
-    image: saturnx/mesero-app:latest
+    image: ghcr.io/saturnx-dev/mesero:main
     container_name: mesero_santas_alitas
     ports:
       - "5806:3000"
