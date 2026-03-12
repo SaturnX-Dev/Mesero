@@ -26,7 +26,7 @@ import {
   Beer,
   ChefHat
 } from 'lucide-react';
-import { SAUCES, FROSTING, SOFT_DRINKS, DIPS } from './data';
+import { SAUCES, FROSTING, SOFT_DRINKS, DIPS, BEER_OPTIONS, ICE_OPTIONS, WATER_TYPE_OPTIONS, TEA_OPTIONS } from './data';
 import { Product, OrderItem, Category } from './types';
 import LOGO_URL from './assets/santas-alitas-logo.svg';
 
@@ -652,35 +652,32 @@ export default function App() {
 
                 <div className="flex-1 overflow-y-auto p-6">
                   {editingProduct ? (
-                    <form onSubmit={saveProduct} className="space-y-4">
+                    <div className="space-y-5">
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-stone-400 uppercase">Nombre</label>
                           <input 
-                            required
                             value={editingProduct.name || ''} 
                             onChange={e => setEditingProduct({...editingProduct, name: e.target.value})}
-                            className={`w-full rounded-xl p-3 outline-none transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white focus:ring-2 focus:ring-accent' : 'bg-stone-50 border-stone-200 focus:ring-2 focus:ring-accent'}`}
+                            className={`w-full rounded-xl p-3 outline-none border transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white' : 'bg-stone-50 border-stone-200'}`}
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-xs font-bold text-stone-400 uppercase">Precio</label>
+                          <label className="text-xs font-bold text-stone-400 uppercase">Precio ($)</label>
                           <input 
-                            required
                             type="number"
                             value={editingProduct.price || ''} 
                             onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})}
-                            className={`w-full rounded-xl p-3 outline-none transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white focus:ring-2 focus:ring-accent' : 'bg-stone-50 border-stone-200 focus:ring-2 focus:ring-accent'}`}
+                            className={`w-full rounded-xl p-3 outline-none border transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white' : 'bg-stone-50 border-stone-200'}`}
                           />
                         </div>
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-stone-400 uppercase">Categoría</label>
                         <select 
-                          required
                           value={editingProduct.category || ''} 
-                          onChange={e => setEditingProduct({...editingProduct, category: e.target.value as Category})}
-                          className={`w-full rounded-xl p-3 outline-none transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white focus:ring-2 focus:ring-accent' : 'bg-stone-50 border-stone-200 focus:ring-2 focus:ring-accent'}`}
+                          onChange={e => setEditingProduct({...editingProduct, category: e.target.value as any})}
+                          className={`w-full rounded-xl p-3 outline-none border transition-colors ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white' : 'bg-stone-50 border-stone-200'}`}
                         >
                           <option value="">Seleccionar...</option>
                           {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -691,10 +688,51 @@ export default function App() {
                         <textarea 
                           value={editingProduct.description || ''} 
                           onChange={e => setEditingProduct({...editingProduct, description: e.target.value})}
-                          className={`w-full rounded-xl p-3 outline-none transition-colors min-h-[80px] ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white focus:ring-2 focus:ring-accent' : 'bg-stone-50 border-stone-200 focus:ring-2 focus:ring-accent'}`}
+                          className={`w-full rounded-xl p-3 outline-none border transition-colors min-h-[70px] ${theme === 'dark' ? 'bg-stone-800 border-stone-700 text-white' : 'bg-stone-50 border-stone-200'}`}
                         />
                       </div>
-                      <div className="flex gap-3 pt-4">
+
+                      {/* Modifier Linker */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-stone-400 uppercase block">Modificadores enlazados</label>
+                        <div className={`rounded-2xl border p-3 space-y-2 ${theme === 'dark' ? 'border-stone-700 bg-stone-800' : 'border-stone-200 bg-stone-50'}`}>
+                          {(editingProduct.modifiers || []).map((mod: any, idx: number) => (
+                            <div key={idx} className={`flex items-center justify-between p-2 rounded-xl text-sm ${theme === 'dark' ? 'bg-stone-700 text-stone-200' : 'bg-white border border-stone-200'}`}>
+                              <div>
+                                <span className="font-bold capitalize">{mod.type}</span>
+                                {mod.baseSelections !== undefined && <span className="text-stone-400 ml-2">(base: {mod.baseSelections})</span>}
+                                {mod.maxSelections !== undefined && <span className="text-stone-400 ml-2">(máx: {mod.maxSelections})</span>}
+                                {mod.options && <span className="text-stone-400 ml-2">· {mod.options.length} ops</span>}
+                              </div>
+                              <button type="button" onClick={() => {
+                                const mods = [...(editingProduct.modifiers || [])];
+                                mods.splice(idx, 1);
+                                setEditingProduct({...editingProduct, modifiers: mods});
+                              }} className="text-red-400 hover:text-red-600 p-1"><X className="w-4 h-4" /></button>
+                            </div>
+                          ))}
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {[['Salsas/Dips', 'accent', () => [{type:'sauces',baseSelections:1,options:SAUCES}]],
+                              ['Tarros/Escarchado', 'accent', () => [{type:'mugs'}]],
+                              ['Cubeta Cervezas', 'accent', () => [{type:'bucket',maxSelections:6,options:BEER_OPTIONS}]],
+                              ['Lista Cervezas', 'accent', () => [{type:'list',options:BEER_OPTIONS}]],
+                              ['Hielo', 'sky', () => [{type:'list',options:ICE_OPTIONS}]],
+                              ['Natural/Mineral', 'sky', () => [{type:'list',options:WATER_TYPE_OPTIONS}]],
+                              ['Sabor Té', 'emerald', () => [{type:'list',options:TEA_OPTIONS}]],
+                              ['Sabor Refresco', 'purple', () => [{type:'list',options:SOFT_DRINKS}]],
+                            ].map(([label, color, getModsFn]: any) => (
+                              <button key={label as string} type="button" onClick={() => {
+                                const mods = [...(editingProduct.modifiers || []), ...getModsFn()];
+                                setEditingProduct({...editingProduct, modifiers: mods});
+                              }} className={`text-xs font-bold px-3 py-1.5 rounded-full border-2 border-transparent transition-all hover:border-accent hover:text-accent ${theme === 'dark' ? 'bg-stone-700 text-stone-300' : 'bg-white border-stone-200 text-stone-600 shadow-sm'}`}>
+                                + {label as string}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
                         <button 
                           type="button"
                           onClick={() => setEditingProduct(null)}
@@ -703,14 +741,15 @@ export default function App() {
                           Cancelar
                         </button>
                         <button 
-                          type="submit"
+                          type="button"
+                          onClick={saveProduct}
                           className="flex-1 bg-accent text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-accent/20 hover:opacity-90 transition-opacity"
                         >
                           <Save className="w-5 h-5" />
                           Guardar
                         </button>
                       </div>
-                    </form>
+                    </div>
                   ) : (
                     <div className="space-y-4">
                       <button 
